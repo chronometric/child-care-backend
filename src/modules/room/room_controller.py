@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from src.modules.room.room_service import RoomService
 from src.modules.room.room_dtos import CreateRoomBody, UpdateRoomBody
 from src.modules.patient_record.patient_record_service import PatientRecordService
+from src.utils.socket_tokens import create_room_token
 from pydantic import ValidationError
 from datetime import datetime
 import os
@@ -285,7 +286,14 @@ def check_patient_authentication():
     patient_password = data.get("patientPassword")
     rlt = RoomService.check_patient_authentication(patient_password)
     if rlt is not False:
-        return {"message": "ok", "roomName": rlt}
+        # Stable identity per room for patient (display name may differ on client)
+        room_token = create_room_token(rlt, "patient", "patient")
+        return {
+            "message": "ok",
+            "roomName": rlt,
+            "room_token": room_token,
+            "participant_id": None,
+        }
 
     return {"message": "no"}
 
@@ -293,9 +301,15 @@ def check_patient_authentication():
 @room_controller.route("/check_guest_authentication", methods=["POST"])
 def check_guest_authentication():
     data = request.get_json()
-    guest_name = data.get("guestName")
+    guest_name = data.get("guestName") or "guest"
     guest_password = data.get("guestId")
     rlt = RoomService.check_guest_authentication(guest_password)
     if rlt is not None:
-        return {"message": "ok", "roomName": rlt}
+        room_token = create_room_token(rlt, "guest", guest_name)
+        return {
+            "message": "ok",
+            "roomName": rlt,
+            "room_token": room_token,
+            "participant_id": None,
+        }
     return {"message": "no"}

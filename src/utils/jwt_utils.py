@@ -1,17 +1,24 @@
-# src/utils/jwt_utils.py
+# Deprecated: use Flask-JWT-Extended + src.utils.socket_tokens for all JWT operations.
+# Kept for accidental imports; delegates to the same secret as the rest of the app.
+import os
 import jwt
-from flask import request
+from constants import Constants
 
-SECRET_KEY = 'your_secret_key'
 
-def generate_token(data):
-    return jwt.encode(data, SECRET_KEY, algorithm='HS256')
+def _secret():
+    return (
+        os.environ.get("JWT_SECRET_KEY")
+        or getattr(Constants, "JWT_SECRET", None)
+        or "dev-only-set-JWT_SECRET_KEY-in-production"
+    )
 
-def verify_token(token):
+
+def generate_token(data: dict) -> str:
+    return jwt.encode(data, _secret(), algorithm="HS256")
+
+
+def verify_token(token: str):
     try:
-        decoded = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
-        return decoded
-    except jwt.ExpiredSignatureError:
-        return None  # Token expired
-    except jwt.InvalidTokenError:
-        return None  # Invalid token
+        return jwt.decode(token, _secret(), algorithms=["HS256"])
+    except jwt.PyJWTError:
+        return None

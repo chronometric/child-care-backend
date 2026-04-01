@@ -10,7 +10,6 @@ from constants import Constants
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_cors import CORS
 import uuid
-from bson.objectid import ObjectId
 from flask import jsonify, request
 from datetime import datetime
 
@@ -81,6 +80,7 @@ from src.modules.waiting_room.waiting_room_controller import waiting_room_contro
 app.register_blueprint(waiting_room_controller, url_prefix="/api/waiting_room")
 
 from src.modules.waiting_room.waiting_room_service import WaitingRoomService
+from src.utils.socket_tokens import decode_socket_token, is_room_token
 
 @app.route("/")
 def index():
@@ -96,21 +96,34 @@ def http_call():
     return jsonify(data)
 
 
-@socketio.on("init")
-def handle_init(data):
+def _apply_socket_identity(data, sid):
     """
-    Initialize the connection with user details.
-    Expected data: {'username': 'name', 'role': 'role', 'roomName': 'metered_room_name'}
-    Registers Socket.IO presence in `socket_sessions` (not MongoDB `users`).
+    Resolve username, role, roomName, participant_key, mongo_user_id from body + optional JWT.
+    Returns (roomName, username, role, participant_key, mongo_user_id) or (None, ...) on error.
     """
+    token = data.get("token")
     username = data.get("username")
     role = data.get("role")
-    sid = request.sid
     roomName = data.get("roomName")
+    participant_key = None
+    mongo_user_id = None
 
+    if token:
+        payload = decode_socket_token(token)
+        if not payload:
+            return None
+        if is_room_token(payload):
+            roomName = payload.get("room_name") or roomName
+            username = payload.get("username") or username
+            role = payload.get("role") or role
+            participant_key = str(payload.get("sub") or "")
+        else:
+            mongo_user_id = str(payload.get("sub") or "")
+            participant_key = f"user:{mongo_user_id}"
     if not roomName:
-        emit("error", {"msg": "roomName is required"})
-        return
+        return None
+    if not participant_key:
+        participant_key = str(uuid.uuid4())
 
     socket_sessions.update_one(
         {"sid": sid},
@@ -119,11 +132,30 @@ def handle_init(data):
                 "username": username,
                 "role": role,
                 "room_name": roomName,
+                "participant_key": participant_key,
+                "mongo_user_id": mongo_user_id,
                 "updated_at": datetime.utcnow(),
             }
         },
         upsert=True,
     )
+    return roomName, username, role, participant_key, mongo_user_id
+
+
+@socketio.on("init")
+def handle_init(data):
+    """
+    Initialize the connection with user details.
+    Optional `token`: staff JWT (Flask-JWT) or `room_token` from check_*_authentication.
+    Legacy: username, role, roomName without token (ephemeral participant_key).
+    """
+    sid = request.sid
+    resolved = _apply_socket_identity(data, sid)
+    if not resolved:
+        emit("error", {"msg": "roomName is required or invalid token"})
+        return
+
+    roomName, username, role, participant_key, mongo_user_id = resolved
     join_room(roomName)
 
     user_uuid = str(uuid.uuid4())
@@ -173,17 +205,17 @@ def handle_init(data):
     print(f"{username} ({role}) connected with SID: {sid} room={roomName}")
 
 
-def _find_or_create_dm_channel(user_a_id: ObjectId, user_b_id: ObjectId) -> str:
-    doc = private_dm_channels.find_one(
-        {"participants": {"$all": [user_a_id, user_b_id], "$size": 2}}
-    )
+def _find_or_create_dm_channel_key(participant_key_a: str, participant_key_b: str) -> str:
+    """Stable DM channel id from two participant keys (not socket_sessions ObjectIds)."""
+    a, b = sorted([participant_key_a, participant_key_b])
+    doc = private_dm_channels.find_one({"participant_keys": [a, b]})
     if doc:
         return doc["channel_id"]
     channel_id = str(uuid.uuid4())
     private_dm_channels.insert_one(
         {
             "channel_id": channel_id,
-            "participants": [user_a_id, user_b_id],
+            "participant_keys": [a, b],
             "created_at": datetime.utcnow(),
         }
     )
@@ -193,7 +225,7 @@ def _find_or_create_dm_channel(user_a_id: ObjectId, user_b_id: ObjectId) -> str:
 @socketio.on("private_message")
 def handle_private_message(data):
     """
-    Handle private messages between sockets (uses socket_sessions, not MongoDB users).
+    DM between two sockets; channel key is stable `participant_key` (room JWT sub or user:userId).
     Expected data: {'to': 'recipient_sid', 'message': 'text'}
     """
     from_sid = request.sid
@@ -204,7 +236,13 @@ def handle_private_message(data):
     recipient = socket_sessions.find_one({"sid": to_sid})
 
     if sender and recipient and message_text is not None:
-        channel_id = _find_or_create_dm_channel(sender["_id"], recipient["_id"])
+        sk_a = sender.get("participant_key")
+        sk_b = recipient.get("participant_key")
+        if not sk_a or not sk_b:
+            emit("error", {"msg": "Missing participant identity"}, to=from_sid)
+            return
+
+        channel_id = _find_or_create_dm_channel_key(sk_a, sk_b)
 
         join_room(channel_id, sid=from_sid)
         join_room(channel_id, sid=to_sid)
@@ -212,7 +250,7 @@ def handle_private_message(data):
         messages_collection.insert_one(
             {
                 "room_id": channel_id,
-                "sender_id": sender["_id"],
+                "sender_key": str(sk_a),
                 "message": message_text,
                 "timestamp": datetime.utcnow(),
             }
@@ -284,7 +322,12 @@ def handle_chat_response(data):
     patient = socket_sessions.find_one({"sid": patient_sid})
 
     if approve and guest and patient:
-        channel_id = _find_or_create_dm_channel(guest["_id"], patient["_id"])
+        gk = guest.get("participant_key")
+        pk = patient.get("participant_key")
+        if not gk or not pk:
+            emit("error", {"msg": "Missing participant identity"}, to=guest_sid)
+            return
+        channel_id = _find_or_create_dm_channel_key(gk, pk)
 
         socket_sessions.update_one(
             {"_id": guest["_id"]}, {"$set": {"dm_channel_id": channel_id}}
@@ -418,6 +461,8 @@ def handle_get_chat_history(data):
         }
         if msg.get("sender_id") is not None:
             entry["sender_id"] = str(msg["sender_id"])
+        if msg.get("sender_key") is not None:
+            entry["sender_key"] = str(msg["sender_key"])
         if msg.get("from_username"):
             entry["from_username"] = msg["from_username"]
         messages.append(entry)
@@ -430,9 +475,26 @@ def handle_join_waiting(data):
     room_name = data.get("roomName")
     username = data.get("username")
     role = data.get("role")
+    token = data.get("token")
     sid = request.sid
     if not room_name or not username or not role:
         return
+    participant_key = None
+    mongo_user_id = None
+    if token:
+        payload = decode_socket_token(token)
+        if payload and is_room_token(payload):
+            if payload.get("room_name") and payload.get("room_name") != room_name:
+                emit("error", {"msg": "Token room mismatch"}, to=sid)
+                return
+            participant_key = str(payload.get("sub") or "")
+            username = payload.get("username") or username
+            role = payload.get("role") or role
+        elif payload:
+            mongo_user_id = str(payload.get("sub") or "")
+            participant_key = f"user:{mongo_user_id}"
+    if not participant_key:
+        participant_key = str(uuid.uuid4())
     socket_sessions.update_one(
         {"sid": sid},
         {
@@ -440,6 +502,8 @@ def handle_join_waiting(data):
                 "username": username,
                 "role": role,
                 "room_name": room_name,
+                "participant_key": participant_key,
+                "mongo_user_id": mongo_user_id,
                 "updated_at": datetime.utcnow(),
             }
         },
