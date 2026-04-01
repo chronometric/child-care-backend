@@ -29,6 +29,10 @@ def upload_file():
 
         # Parse JSON data for folder_name
         folder_name = request.form.get("folder_name", "default")
+        patient_personal_id = request.form.get("patient_personal_id") or None
+        room_name = request.form.get("room_name") or None
+        shared_raw = (request.form.get("shared_with_patient") or "").lower()
+        shared_with_patient = shared_raw in ("1", "true", "yes", "on")
 
         # Get the file from the form data
         if 'file' not in request.files:
@@ -43,7 +47,10 @@ def upload_file():
             folder_name=folder_name,
             file_data=file.read(),
             filename=filename,
-            content_type=file.content_type
+            content_type=file.content_type,
+            patient_personal_id=patient_personal_id,
+            room_name=room_name,
+            shared_with_patient=shared_with_patient,
         )
 
         if file_id:

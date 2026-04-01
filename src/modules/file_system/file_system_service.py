@@ -62,7 +62,16 @@ class FileSystemService:
         return "unknown"
 
     @staticmethod
-    def upload_file(user_id: str, folder_name: str, file_data: bytes, filename: str, content_type: str):
+    def upload_file(
+        user_id: str,
+        folder_name: str,
+        file_data: bytes,
+        filename: str,
+        content_type: str,
+        patient_personal_id=None,
+        room_name=None,
+        shared_with_patient: bool = False,
+    ):
         try:
             # Calculate file size in bytes
             file_size = len(file_data)
@@ -77,8 +86,13 @@ class FileSystemService:
                 "file_size": file_size,  # New file size field
                 "file_directory": folder_name,  # Store directory name
                 "file_type": file_type,  # Store file type
-                "upload_date": datetime.utcnow()
+                "upload_date": datetime.utcnow(),
+                "shared_with_patient": bool(shared_with_patient),
             }
+            if patient_personal_id:
+                metadata["patient_personal_id"] = str(patient_personal_id).strip()
+            if room_name:
+                metadata["room_name"] = str(room_name).strip()
 
             # Store file in GridFS with metadata
             file_id = fs.put(file_data, filename=filename, metadata=metadata, content_type=content_type)
@@ -98,7 +112,10 @@ class FileSystemService:
             "file_size": file.metadata.get("file_size", 0),  # Retrieve file size
             "upload_date": file.metadata["upload_date"],
             "file_directory": file.metadata.get("file_directory", ""),
-            "file_type": file.metadata.get("file_type", "unknown")
+            "file_type": file.metadata.get("file_type", "unknown"),
+            "patient_personal_id": file.metadata.get("patient_personal_id"),
+            "room_name": file.metadata.get("room_name"),
+            "shared_with_patient": file.metadata.get("shared_with_patient", False),
         } for file in files]
 
     @staticmethod

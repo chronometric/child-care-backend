@@ -103,3 +103,15 @@ class RoomService:
             print(f"Error authenticating patient: {e}")
             return False
 
+    @staticmethod
+    def get_room_by_patient_password(password: str):
+        """Resolve room by patient password without enforcing one-patient-in-room (used for portal APIs)."""
+        try:
+            room = db.rooms.find_one({"patient_password": password})
+            if room:
+                room["_id"] = str(room["_id"])
+            return room
+        except Exception as e:
+            print(f"Error resolving room by patient password: {e}")
+            return None
+

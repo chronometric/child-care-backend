@@ -84,15 +84,18 @@ def login_admin():
     
 
 @admin_controller.route('/users', methods=['GET'])
+@jwt_required()
 def get_users():
-    # Extract pagination parameters (default: page 1, page size 10)
+    """Paginated doctor accounts — admin JWT only."""
+    admin_id = get_jwt_identity()
+    if not AdminService.get_one(str(admin_id)):
+        return jsonify({"error": "Forbidden"}), 403
     try:
-        page = int(request.args.get('page', 1))  # Default to page 1
-        page_size = int(request.args.get('page_size', 10))  # Default to page size 10
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 10))
 
-        # Fetch paginated users from UserService
         result = UserService.get_all(page=page, page_size=page_size)
-        
+
         return jsonify(result), 200
     except ValueError:
         return jsonify({"error": "Invalid pagination parameters"}), 400
