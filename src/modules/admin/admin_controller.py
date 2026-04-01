@@ -203,6 +203,22 @@ def get_companies_and_users():
         return jsonify({"error": str(e)}), 500
 
 
+@admin_controller.route('/governance-audit', methods=['GET'])
+@jwt_required()
+def governance_audit():
+    """Care / AI audit log (append-only) for admin database governance story."""
+    admin_id = get_jwt_identity()
+    if not AdminService.get_one(str(admin_id)):
+        return jsonify({"error": "Forbidden"}), 403
+    try:
+        limit = int(request.args.get("limit", 100))
+    except ValueError:
+        limit = 100
+    from src.modules.meetings_ai.governance_service import list_audit
+
+    return jsonify(list_audit(limit)), 200
+
+
 @admin_controller.route('/system-overview', methods=['GET'])
 @jwt_required()
 def system_overview():

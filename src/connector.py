@@ -76,6 +76,9 @@ app.register_blueprint(notification_controller, url_prefix="/api/notifications")
 from src.modules.meeting_ai.meeting_ai_controller import meeting_ai_controller
 app.register_blueprint(meeting_ai_controller, url_prefix="/api/meeting_ai")
 
+from src.modules.meetings_ai.meetings_ai_controller import meetings_ai_controller
+app.register_blueprint(meetings_ai_controller, url_prefix="/api/meetings_ai")
+
 from src.modules.waiting_room.waiting_room_controller import waiting_room_controller
 app.register_blueprint(waiting_room_controller, url_prefix="/api/waiting_room")
 
