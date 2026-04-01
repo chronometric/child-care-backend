@@ -25,7 +25,19 @@ class EventService:
             "updated_at": datetime.utcnow()
         }
         result = db.events.insert_one(event_data)
-        return str(result.inserted_id)
+        event_id = str(result.inserted_id)
+        try:
+            from src.modules.notification.notification_service import NotificationService
+            NotificationService.create(
+                user_id,
+                f"Session scheduled: {body.event_name}",
+                (body.description or "")[:500],
+                "calendar",
+                {"event_id": event_id, "patient_name": body.patient_name or ""},
+            )
+        except Exception as e:
+            print(f"Notification on event create failed: {e}")
+        return event_id
     
     @staticmethod
     def get_user_events(user_id: str, start_date: str, end_date: str):

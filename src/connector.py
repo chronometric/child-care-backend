@@ -63,6 +63,20 @@ app.register_blueprint(event_controller, url_prefix='/api/events')
 from src.modules.file_system.file_system_controller import file_system_controller
 app.register_blueprint(file_system_controller, url_prefix='/api/file_system')
 
+from src.modules.patient_record.patient_record_controller import patient_record_controller
+app.register_blueprint(patient_record_controller, url_prefix="/api/patient_records")
+
+from src.modules.notification.notification_controller import notification_controller
+app.register_blueprint(notification_controller, url_prefix="/api/notifications")
+
+from src.modules.meeting_ai.meeting_ai_controller import meeting_ai_controller
+app.register_blueprint(meeting_ai_controller, url_prefix="/api/meeting_ai")
+
+from src.modules.waiting_room.waiting_room_controller import waiting_room_controller
+app.register_blueprint(waiting_room_controller, url_prefix="/api/waiting_room")
+
+from src.modules.waiting_room.waiting_room_service import WaitingRoomService
+
 @app.route("/")
 def index():
     return "Backend"
@@ -346,6 +360,10 @@ def handle_room_message(data):
 @socketio.on("disconnect")
 def handle_disconnect():
     sid = request.sid
+    try:
+        WaitingRoomService.remove_by_sid(sid)
+    except Exception:
+        pass
     user = users_collection.find_one({"sid": sid})
     if user:
         username = user.get("username", "Unknown")
@@ -384,6 +402,67 @@ def handle_get_chat_history(data):
         for msg in messages_cursor
     ]
     emit("chat_history", {"room_id": room_id, "messages": messages})
+
+
+@socketio.on("join_waiting_room")
+def handle_join_waiting(data):
+    """Participant (patient/guest) requests to enter the session; host admits via admit_waiting."""
+    room_name = data.get("roomName")
+    username = data.get("username")
+    role = data.get("role")
+    sid = request.sid
+    if not room_name or not username or not role:
+        return
+    WaitingRoomService.add_or_update(room_name, sid, username, role, "pending")
+    emit(
+        "waiting_room_update",
+        {
+            "room_name": room_name,
+            "queue": WaitingRoomService.list_pending(room_name),
+        },
+        broadcast=True,
+    )
+
+
+@socketio.on("admit_waiting")
+def handle_admit_waiting(data):
+    room_name = data.get("roomName")
+    target_sid = data.get("targetSid")
+    if not room_name or not target_sid:
+        return
+    WaitingRoomService.set_status(room_name, target_sid, "admitted")
+    emit("admission_granted", {"room_name": room_name}, to=target_sid)
+    emit(
+        "waiting_room_update",
+        {
+            "room_name": room_name,
+            "queue": WaitingRoomService.list_pending(room_name),
+        },
+        broadcast=True,
+    )
+
+
+@socketio.on("reject_waiting")
+def handle_reject_waiting(data):
+    room_name = data.get("roomName")
+    target_sid = data.get("targetSid")
+    if not room_name or not target_sid:
+        return
+    WaitingRoomService.set_status(room_name, target_sid, "rejected")
+    emit(
+        "admission_denied",
+        {"room_name": room_name, "reason": "Host declined entry"},
+        to=target_sid,
+    )
+    WaitingRoomService.remove(room_name, target_sid)
+    emit(
+        "waiting_room_update",
+        {
+            "room_name": room_name,
+            "queue": WaitingRoomService.list_pending(room_name),
+        },
+        broadcast=True,
+    )
 
 
 def get_creator_sid():

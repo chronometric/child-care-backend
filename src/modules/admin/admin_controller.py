@@ -7,6 +7,7 @@ from src.modules.admin.email_service import send_email  # Import email sending f
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from constants import Constants
 from src.modules.company.company_service import CompanyService
+from src.modules.admin.admin_system_service import AdminSystemService
 from pymongo import MongoClient
 
 
@@ -197,3 +198,23 @@ def get_companies_and_users():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@admin_controller.route('/system-overview', methods=['GET'])
+@jwt_required()
+def system_overview():
+    return jsonify(AdminSystemService.system_overview()), 200
+
+
+@admin_controller.route('/ai-config', methods=['GET'])
+@jwt_required()
+def get_ai_config():
+    return jsonify(AdminSystemService.get_ai_config()), 200
+
+
+@admin_controller.route('/ai-config', methods=['PUT'])
+@jwt_required()
+def put_ai_config():
+    data = request.get_json() or {}
+    allowed = {k: data[k] for k in ('openai_model', 'system_prompt_override', 'waiting_room_enabled') if k in data}
+    return jsonify(AdminSystemService.set_ai_config(allowed)), 200

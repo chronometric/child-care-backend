@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from src.modules.room.room_service import RoomService
 from src.modules.room.room_dtos import CreateRoomBody, UpdateRoomBody
+from src.modules.patient_record.patient_record_service import PatientRecordService
 from pydantic import ValidationError
 from datetime import datetime
 import os
@@ -239,6 +240,17 @@ def end_meeting():
         {"$set": {"ended_at": datetime.now()}},
     )
     if result.modified_count > 0:
+        room = rooms_collection.find_one({"room_name": room_name})
+        if room and room.get("patient_personal_id") and room.get("email"):
+            try:
+                PatientRecordService.link_meeting(
+                    room["email"],
+                    room["patient_personal_id"],
+                    room_name,
+                    room.get("patient_name"),
+                )
+            except Exception as e:
+                print(f"Patient record link on end: {e}")
         return {"success": True, "message": "Meeting ended."}
     return {"success": False, "message": "Room not found or already ended."}
 
