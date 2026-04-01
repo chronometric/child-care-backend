@@ -4,6 +4,9 @@ from constants import Constants  # Assuming you have email credentials stored in
 
 def send_email(recipient_email: str, subject: str, body: str):
     try:
+        if not Constants.SMTP_USERNAME or not Constants.SMTP_PASSWORD:
+            print("SMTP not configured (SMTP_USERNAME / SMTP_PASSWORD missing); skipping send.")
+            return
         msg = MIMEText(body)
         msg['Subject'] = subject
         msg['From'] = Constants.SMTP_USERNAME

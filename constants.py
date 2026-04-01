@@ -15,8 +15,8 @@ class Constants:
     AWS_SECRET_KEY = os.environ.get('AWS_SECRET_KEY')
     BUCKET_NAME = os.environ.get('BUCKET_NAME')
 
-
-    SMTP_SERVER = "smtp.mailersend.net"  # Replace with your SMTP server
-    SMTP_PORT = 587  # Replace with your SMTP port
-    SMTP_USERNAME = "MS_2rAuYG@trial-ynrw7gy56xj42k8e.mlsender.net"  # Replace with your email address
-    SMTP_PASSWORD = "mqTJky4lpUjyYc6w"  # Replace with your email password
+    # SMTP: set in environment — never commit real credentials to source control
+    SMTP_SERVER = os.environ.get('SMTP_SERVER', 'smtp.mailersend.net')
+    SMTP_PORT = int(os.environ.get('SMTP_PORT', '587'))
+    SMTP_USERNAME = os.environ.get('SMTP_USERNAME', '')
+    SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', '')

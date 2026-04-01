@@ -24,20 +24,28 @@ Entry point: `main.py` (Socket.IO server). Application wiring lives in `src/conn
 
 ## Environment variables
 
-Create a `.env` file in the project root (loaded via `python-dotenv`). Typical variables:
+Create a `.env` file in the project root (loaded via `python-dotenv`). A full template with comments is in **`.env.example`** — copy it and fill in values:
+
+```bash
+cp .env.example .env
+```
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | MongoDB connection URI |
 | `PORT` | No | HTTP port (default `8000`) |
-| `JWT_SECRET` / app config | See `connector.py` | Align JWT secret with deployment; `connector.py` sets `JWT_SECRET_KEY` for Flask-JWT-Extended |
+| `JWT_SECRET_KEY` | Yes (production) | Secret for signing JWTs; falls back to `JWT_SECRET` from `constants.py` or a dev placeholder |
 | `METERED_SECRET_KEY` | Yes | Metered API secret |
 | `METERED_DOMAIN` | Yes | Metered domain (used in room creation/validation) |
 | `OPENAI_API_KEY` | No | Enables AI summaries in meeting reports |
 | `OPENAI_MODEL` | No | Defaults to `gpt-4o-mini` in meeting AI service |
 | `PROD`, `APP_NAME`, `TOKEN_VALIDITY` | No | Optional operational flags |
 | AWS / S3 | No | `AWS_ACCESS_KEY`, `AWS_SECRET_KEY`, `BUCKET_NAME` if used for uploads |
-| SMTP | No | Prefer moving any mail credentials from code into environment variables for production |
+| `SMTP_*` | No | See `.env.example` — required if sending mail (admin flows) |
+
+### Socket.IO vs MongoDB `users`
+
+Doctor accounts live in MongoDB `users`. **Socket.IO presence** uses the separate `socket_sessions` collection (and `private_dm_channels` for DM routing) so disconnect handlers never delete REST user documents. In-room chat is scoped per metered `room_name` via Socket.IO rooms; messages are persisted on `messages` with `room_name` / `room_id` as applicable.
 
 ### Security
 
