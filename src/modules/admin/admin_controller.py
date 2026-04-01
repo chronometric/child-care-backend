@@ -1,22 +1,49 @@
+import os
+
 from flask import Blueprint, request, jsonify
 from src.modules.admin.admin_service import AdminService
 from src.modules.admin.admin_dtos import CreateAdminBody, UpdateAdminBody
 from pydantic import ValidationError
 from src.modules.user.user_service import UserService
 from src.modules.admin.email_service import send_email  # Import email sending function
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
+from flask_jwt_extended.exceptions import JWTExtendedException
 from constants import Constants
 from src.modules.company.company_service import CompanyService
 from src.modules.admin.admin_system_service import AdminSystemService
 from pymongo import MongoClient
+
+from src.extensions import limiter
 
 
 admin_controller = Blueprint('admins', __name__)
 client = MongoClient(Constants.DATABASE_URL)
 db = client['CC-database']
 
+
+def _require_admin_identity():
+    """Return admin id if JWT identity is a valid admin, else None."""
+    aid = get_jwt_identity()
+    if not aid or not AdminService.get_one(str(aid)):
+        return None
+    return str(aid)
+
+
 @admin_controller.route('/', methods=['POST'])
 def create_admin():
+    """First admin: optional X-Admin-Bootstrap when ADMIN_BOOTSTRAP_SECRET is set. Later: admin JWT only."""
+    count = AdminService.count_admins()
+    if count > 0:
+        try:
+            verify_jwt_in_request()
+        except JWTExtendedException:
+            return jsonify({"error": "Authentication required"}), 401
+        if not _require_admin_identity():
+            return jsonify({"error": "Forbidden"}), 403
+    else:
+        secret = os.environ.get("ADMIN_BOOTSTRAP_SECRET", "").strip()
+        if secret and request.headers.get("X-Admin-Bootstrap") != secret:
+            return jsonify({"error": "Invalid or missing X-Admin-Bootstrap header"}), 403
     try:
         data = request.get_json()
         body = CreateAdminBody(**data)
@@ -26,19 +53,28 @@ def create_admin():
         return jsonify({"error": e.errors()}), 400
 
 @admin_controller.route('/', methods=['GET'])
+@jwt_required()
 def get_admins():
+    if not _require_admin_identity():
+        return jsonify({"error": "Forbidden"}), 403
     admins = AdminService.get_all()
     return jsonify(admins), 200
 
 @admin_controller.route('/<admin_id>', methods=['GET'])
+@jwt_required()
 def get_admin(admin_id):
+    if not _require_admin_identity():
+        return jsonify({"error": "Forbidden"}), 403
     admin = AdminService.get_one(admin_id)
     if admin:
         return jsonify(admin), 200
     return jsonify({"error": "Admin not found"}), 404
 
 @admin_controller.route('/<admin_id>', methods=['PUT'])
+@jwt_required()
 def update_admin(admin_id):
+    if not _require_admin_identity():
+        return jsonify({"error": "Forbidden"}), 403
     try:
         data = request.get_json()
         body = UpdateAdminBody(**data)
@@ -50,18 +86,25 @@ def update_admin(admin_id):
         return jsonify({"error": e.errors()}), 400
 
 @admin_controller.route('/<admin_id>', methods=['DELETE'])
+@jwt_required()
 def delete_admin(admin_id):
+    if not _require_admin_identity():
+        return jsonify({"error": "Forbidden"}), 403
     success = AdminService.delete_one(admin_id)
     if success:
         return jsonify({"message": "Admin deleted successfully"}), 200
     return jsonify({"error": "Admin not found"}), 404
 
 @admin_controller.route('/delete-all', methods=['DELETE'])
+@jwt_required()
 def delete_all_admins():
+    if not _require_admin_identity():
+        return jsonify({"error": "Forbidden"}), 403
     AdminService.delete_all()
     return jsonify({"message": "All admins deleted successfully"}), 200
 
 @admin_controller.route('/login', methods=['POST'])
+@limiter.limit("20 per minute")
 def login_admin():
     try:
         data = request.get_json()
@@ -124,6 +167,8 @@ def get_current_admin():
 @admin_controller.route('/send-company-code', methods=['POST'])
 @jwt_required()
 def send_company_code():
+    if not _require_admin_identity():
+        return jsonify({"error": "Forbidden"}), 403
     try:
         # Parse request JSON
         data = request.get_json()
@@ -152,7 +197,10 @@ def send_company_code():
 
 
 @admin_controller.route('/companies-and-users', methods=['POST'])
+@jwt_required()
 def get_companies_and_users():
+    if not _require_admin_identity():
+        return jsonify({"error": "Forbidden"}), 403
     try:
         # Parse request body
         data = request.get_json()
@@ -222,18 +270,24 @@ def governance_audit():
 @admin_controller.route('/system-overview', methods=['GET'])
 @jwt_required()
 def system_overview():
+    if not _require_admin_identity():
+        return jsonify({"error": "Forbidden"}), 403
     return jsonify(AdminSystemService.system_overview()), 200
 
 
 @admin_controller.route('/ai-config', methods=['GET'])
 @jwt_required()
 def get_ai_config():
+    if not _require_admin_identity():
+        return jsonify({"error": "Forbidden"}), 403
     return jsonify(AdminSystemService.get_ai_config()), 200
 
 
 @admin_controller.route('/ai-config', methods=['PUT'])
 @jwt_required()
 def put_ai_config():
+    if not _require_admin_identity():
+        return jsonify({"error": "Forbidden"}), 403
     data = request.get_json() or {}
     allowed = {k: data[k] for k in ('openai_model', 'system_prompt_override', 'waiting_room_enabled') if k in data}
     return jsonify(AdminSystemService.set_ai_config(allowed)), 200

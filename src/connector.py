@@ -1,7 +1,7 @@
 import os
 from typing import Optional
 from datetime import timedelta
-from flask import Flask
+from flask import Flask, jsonify
 from flask_jwt_extended import JWTManager
 from flask_openapi3 import OpenAPI, Info
 from pymongo import MongoClient
@@ -10,7 +10,7 @@ from constants import Constants
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_cors import CORS
 import uuid
-from flask import jsonify, request
+from flask import request
 from datetime import datetime
 
 client = MongoClient(Constants.DATABASE_URL)
@@ -25,6 +25,18 @@ private_dm_channels = db["private_dm_channels"]
 info = Info(title="Your API", version="1.0.0")
 app = OpenAPI(__name__, info=info)
 
+if os.environ.get("SENTRY_DSN"):
+    try:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=os.environ["SENTRY_DSN"],
+            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+            environment=os.environ.get("SENTRY_ENVIRONMENT", os.environ.get("FLASK_ENV", "production")),
+        )
+    except ImportError:
+        pass
+
 app.config["DEBUG"] = False
 app.config["CACHE_TYPE"] = "null"
 app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY") or getattr(
@@ -38,6 +50,10 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 connected_users = {}
 
 jwt = JWTManager(app)
+
+from src.extensions import limiter
+
+limiter.init_app(app)
 
 # BP REG
 from src.modules.user.user_controller import user_controller
@@ -82,12 +98,31 @@ app.register_blueprint(meetings_ai_controller, url_prefix="/api/meetings_ai")
 from src.modules.waiting_room.waiting_room_controller import waiting_room_controller
 app.register_blueprint(waiting_room_controller, url_prefix="/api/waiting_room")
 
+from src.modules.monitoring.monitoring_controller import monitoring_controller
+app.register_blueprint(monitoring_controller, url_prefix="/api/monitoring")
+
 from src.modules.waiting_room.waiting_room_service import WaitingRoomService
 from src.utils.socket_tokens import decode_socket_token, is_room_token
 
 @app.route("/")
 def index():
     return "Backend"
+
+
+@app.route("/api/health")
+def api_health_alias():
+    """Alias for load balancers / k8s probes (same contract as /api/monitoring/health)."""
+    return (
+        jsonify(
+            {
+                "status": "ok",
+                "service": "child-care-backend",
+                "sentry_enabled": bool(os.environ.get("SENTRY_DSN")),
+            }
+        ),
+        200,
+    )
+
 
 ###################################
 

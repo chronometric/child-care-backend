@@ -6,9 +6,12 @@ from pydantic import ValidationError
 from werkzeug.utils import secure_filename
 from io import BytesIO
 
+from src.extensions import limiter
+
 user_controller = Blueprint('users', __name__)
 
 @user_controller.route('/register', methods=['POST'])
+@limiter.limit("5 per minute")
 def register_user():
     try:        
         data = request.get_json()
@@ -201,6 +204,7 @@ def delete_all_users():
 
 
 @user_controller.route('/login', methods=['POST'])
+@limiter.limit("20 per minute")
 def login_user():
     try:
         data = request.get_json()

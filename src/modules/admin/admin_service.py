@@ -15,6 +15,14 @@ db = client['CC-database']
 class AdminService:
 
     @staticmethod
+    def count_admins() -> int:
+        try:
+            return db.admins.count_documents({})
+        except Exception as e:
+            print(f"Error counting admins: {e}")
+            return 0
+
+    @staticmethod
     def create(body: CreateAdminBody):
         # Hash the password before storing it
         hashed_password = bcrypt.hashpw(body.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
